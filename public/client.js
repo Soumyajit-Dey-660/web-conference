@@ -4,15 +4,17 @@ const roomSelectionContainer = document.getElementById(
 );
 const shareScreenButton = document.getElementById("share-screen");
 const roomInput = document.getElementById("room-input");
-const connectButton = document.getElementById("connect-button");
+const joinButton = document.getElementById("join-button");
 const createButton = document.getElementById("create-button");
 const videoChatContainer = document.getElementById("video-chat-container");
 const localVideoComponent = document.getElementById("local-video");
 const remoteVideoComponent = document.getElementById("remote-video");
-const localVideoText = document.getElementById("local-video-text")
+const screenVideoComponent = document.getElementById("local-screen-video");
+const localVideoText = document.getElementById("local-video-text");
 const remoteVideoText = document.getElementById("remote-video-text");
 
-shareScreenButton.style = "display: none";
+// shareScreenButton.style = "display:none";
+$('#share-screen').hide(); 
 
 // Variables.
 const socket = io();
@@ -21,7 +23,9 @@ const mediaConstraints = {
   video: { width: 400, height: 300 },
 };
 let localStream;
+let localScreenStream;
 let remoteStream;
+let remoteScreenStream;
 let isRoomCreator;
 let rtcPeerConnection; // Connection between the local device and the remote peer.
 let roomId;
@@ -41,27 +45,24 @@ const iceServers = {
 shareScreenButton.addEventListener('click', () => {
   shareScreen(mediaConstraints);
 })
-connectButton.addEventListener("click", () => {
-  // console.log("JOIN ROOM BUTTON CLICKED");
+
+joinButton.addEventListener("click", () => {
   joinRoom(roomInput.value);
 });
 
 createButton.addEventListener("click", () => {
-  // console.log("JOIN ROOM BUTTON CLICKED");
   createRoom(roomInput.value);
 });
 
 // SOCKET EVENT CALLBACKS =====================================================
 socket.on("room_created", async () => {
   console.log("Socket event callback: room_created");
-
   await setLocalStream(mediaConstraints, 1);
   isRoomCreator = true;
 });
 
 socket.on("room_joined", async () => {
   console.log("Socket event callback: room_joined");
-
   await setLocalStream(mediaConstraints, 0);
   socket.emit("start_call", roomId);
 });
@@ -92,8 +93,9 @@ function createRoom(room) {
   }
 } 
 
-shareScreen = mediaConstraints => {
-  console.log('SHARE SCREEN BUTTON CLICKED')
+shareScreen = async mediaConstraints => {
+  console.log('SHARE SCREEN BUTTON CLICKED');
+  await setLocalScreenStream(mediaConstraints, 1);
 }
 
 function showVideoConference() {
@@ -115,14 +117,36 @@ async function setLocalStream(mediaConstraints, flag) {
   localVideoComponent.srcObject = stream;
 }
 
+async function setLocalScreenStream(mediaConstraints) {
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia(mediaConstraints);
+  } catch (error) {
+    console.log("Could not get Scrren media", error);
+  }
+  localScreenStream = stream;
+  screenVideoComponent.srcObject = stream;
+  socket.emit("start_screen_share", roomId);
+}
+
 // SOCKET EVENT CALLBACKS =====================================================
 socket.on('start_call', async () => {
   console.log('Socket event callback: start_call')
-
   if (isRoomCreator) {
     rtcPeerConnection = new RTCPeerConnection(iceServers)
     addLocalTracks(rtcPeerConnection)
     rtcPeerConnection.ontrack = setRemoteStream
+    rtcPeerConnection.onicecandidate = sendIceCandidate
+    await createOffer(rtcPeerConnection)
+  }
+})
+
+socket.on('start_screen_share', async () => {
+  console.log('Socket Event callback: start_screen_share')
+  if (isRoomCreator) {
+    rtcPeerConnection = new RTCPeerConnection(iceServers)
+    addLocalScreenTracks(rtcPeerConnection)
+    // rtcPeerConnection.ontrack = setRemoteScreenStream
     rtcPeerConnection.onicecandidate = sendIceCandidate
     await createOffer(rtcPeerConnection)
   }
@@ -165,6 +189,12 @@ function addLocalTracks(rtcPeerConnection) {
   })
 }
 
+function addLocalScreenTracks(rtcPeerConnection) {
+  localScreenStream.getTracks().forEach((track) => {
+    rtcPeerConnection.addTrack(track, localScreenStream)
+  })
+}
+
 async function createOffer(rtcPeerConnection) {
   let sessionDescription
   try {
@@ -200,7 +230,11 @@ async function createAnswer(rtcPeerConnection) {
 function setRemoteStream(event) {
   remoteVideoComponent.srcObject = event.streams[0]
   remoteStream = event.stream
-  console.log("remote video ---> ")
+}
+
+function setRemoteScreenStream(event) {
+  remoteVideoComponent.srcObject = event.streams[1]
+  remoteStream = event.stream
 }
 
 function sendIceCandidate(event) {
